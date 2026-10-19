@@ -32,6 +32,7 @@ private func cameras() -> [AVCaptureDevice] {
     ).devices
 }
 
+
 private func microphones() -> [AVCaptureDevice] {
     let types: [AVCaptureDevice.DeviceType]
 
