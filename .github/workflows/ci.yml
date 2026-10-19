@@ -1,0 +1,14 @@
+name: macOS CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: ./scripts/build.sh
+      - name: Smoke tests (no camera/mic required)
+        run: ./scripts/smoke-test.sh
