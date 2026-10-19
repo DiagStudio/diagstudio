@@ -9,6 +9,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build
-        run: ./scripts/build.sh
+        run:  bash ./scripts/build.sh
       - name: Smoke tests (no camera/mic required)
         run: ./scripts/smoke-test.sh

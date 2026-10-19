@@ -17,16 +17,32 @@ private func permissionName(_ status: AVAuthorizationStatus) -> String {
 }
 
 private func cameras() -> [AVCaptureDevice] {
-    AVCaptureDevice.DiscoverySession(
-        deviceTypes: [.builtInWideAngleCamera, .externalUnknown],
+    let types: [AVCaptureDevice.DeviceType]
+
+    if #available(macOS 14.0, *) {
+        types = [.builtInWideAngleCamera, .external]
+    } else {
+        types = [.builtInWideAngleCamera, .externalUnknown]
+    }
+
+    return AVCaptureDevice.DiscoverySession(
+        deviceTypes: types,
         mediaType: .video,
         position: .unspecified
     ).devices
 }
 
 private func microphones() -> [AVCaptureDevice] {
-    AVCaptureDevice.DiscoverySession(
-        deviceTypes: [.builtInMicrophone, .externalUnknown],
+    let types: [AVCaptureDevice.DeviceType]
+
+    if #available(macOS 14.0, *) {
+        types = [.microphone, .external]
+    } else {
+        types = [.builtInMicrophone, .externalUnknown]
+    }
+
+    return AVCaptureDevice.DiscoverySession(
+        deviceTypes: types,
         mediaType: .audio,
         position: .unspecified
     ).devices
