@@ -4,7 +4,7 @@ import CoreMedia
 
 // DiagStudio 0.1.0 — native macOS camera and audio diagnostics.
 // No camera frames or microphone samples are saved or transmitted.
-private let version = "0.1.0"
+private let version = "0.2.0"
 
 private func permissionName(_ status: AVAuthorizationStatus) -> String {
     switch status {
@@ -31,7 +31,6 @@ private func cameras() -> [AVCaptureDevice] {
         position: .unspecified
     ).devices
 }
-
 
 private func microphones() -> [AVCaptureDevice] {
     let types: [AVCaptureDevice.DeviceType]
@@ -127,27 +126,62 @@ private func cameraTest(index: Int, seconds: TimeInterval) -> Bool {
 
 private final class AudioMeter {
     private let lock = NSLock()
-    private var _buffers = 0
-    private var _peak: Float = 0
-    var snapshot: (Int, Float) {
-        lock.lock(); defer { lock.unlock() }
-        return (_buffers, _peak)
+    private var buffers = 0
+    private var emptyBuffers = 0
+    private var unsupportedBuffers = 0
+    private var peak: Float = 0
+    private var sumOfSquares: Double = 0
+    private var sampleCount: Int64 = 0
+
+    var snapshot: (buffers: Int, empty: Int, unsupported: Int, peak: Float, rms: Double, samples: Int64) {
+        lock.lock()
+        defer { lock.unlock() }
+        let rms = sampleCount > 0 ? sqrt(sumOfSquares / Double(sampleCount)) : 0
+        return (buffers, emptyBuffers, unsupportedBuffers, peak, rms, sampleCount)
     }
+
     func measure(_ buffer: AVAudioPCMBuffer) {
-        guard let channels = buffer.floatChannelData else { return }
         let frames = Int(buffer.frameLength)
-        guard frames > 0 else { return }
-        var peak: Float = 0
-        for channel in 0..<Int(buffer.format.channelCount) {
+        let channelCount = Int(buffer.format.channelCount)
+
+        guard frames > 0, channelCount > 0 else {
+            lock.lock(); emptyBuffers += 1; lock.unlock()
+            return
+        }
+
+        // AVAudioEngine typically supplies Float32 PCM. Never reinterpret integer
+        // data as floats: that would produce meaningless measurements.
+        guard buffer.format.commonFormat == .pcmFormatFloat32,
+              let channels = buffer.floatChannelData else {
+            lock.lock(); unsupportedBuffers += 1; lock.unlock()
+            return
+        }
+
+        var localPeak: Float = 0
+        var localSum: Double = 0
+        var localSamples: Int64 = 0
+        for channel in 0..<channelCount {
             for frame in 0..<frames {
-                peak = max(peak, abs(channels[channel][frame]))
+                let sample = channels[channel][frame]
+                guard sample.isFinite else { continue }
+                localPeak = max(localPeak, abs(sample))
+                localSum += Double(sample) * Double(sample)
+                localSamples += 1
             }
         }
+
         lock.lock()
-        _buffers += 1
-        _peak = max(_peak, peak)
+        buffers += 1
+        peak = max(peak, localPeak)
+        sumOfSquares += localSum
+        sampleCount += localSamples
         lock.unlock()
     }
+}
+
+private func audioDecibels(_ linear: Double) -> String {
+    guard linear > 0 else { return "-inf dBFS" }
+    return String(format: "%.1f dBFS", 20 * log10(linear))
 }
 
 private func microphoneTest(seconds: TimeInterval) -> Bool {
@@ -155,6 +189,7 @@ private func microphoneTest(seconds: TimeInterval) -> Bool {
         print("ERROR: Microphone permission denied. Enable access in System Settings > Privacy & Security > Microphone.")
         return false
     }
+
     let engine = AVAudioEngine()
     let input = engine.inputNode
     let format = input.outputFormat(forBus: 0)
@@ -162,6 +197,13 @@ private func microphoneTest(seconds: TimeInterval) -> Bool {
         print("ERROR: No valid microphone input format available.")
         return false
     }
+
+    print("Input format: \(Int(format.sampleRate)) Hz, \(format.channelCount) channel(s), \(format.commonFormat.rawValue), interleaved: \(format.isInterleaved)")
+    if format.commonFormat != .pcmFormatFloat32 {
+        print("ERROR: This test expects Float32 PCM from AVAudioEngine. Actual format: \(format)")
+        return false
+    }
+
     let meter = AudioMeter()
     print("Testing microphone for \(Int(seconds)) seconds. Speak normally...")
     input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
@@ -171,21 +213,30 @@ private func microphoneTest(seconds: TimeInterval) -> Bool {
         input.removeTap(onBus: 0)
         engine.stop()
     }
+
     do {
         try engine.start()
         Thread.sleep(forTimeInterval: seconds)
-        let (buffers, peak) = meter.snapshot
-        print("Audio buffers received: \(buffers)")
-        print(String(format: "Peak input level: %.4f", peak))
-        guard buffers > 0 else {
-            print("FAIL: No audio buffers received. Check input device and privacy permissions.")
+        engine.stop()
+        let data = meter.snapshot
+        print("Audio buffers received: \(data.buffers)")
+        print("Empty buffers: \(data.empty)")
+        print("Unsupported-format buffers: \(data.unsupported)")
+        print("Samples measured: \(data.samples)")
+        print(String(format: "Peak input level: %.6f (%@)", data.peak, audioDecibels(Double(data.peak))))
+        print(String(format: "RMS input level: %.6f (%@)", data.rms, audioDecibels(data.rms)))
+
+        guard data.buffers > 0, data.samples > 0 else {
+            print("FAIL: No usable audio samples received. Check input format, microphone selection and privacy settings.")
             return false
         }
-        if peak < 0.001 {
-            print("WARNING: Audio was received but almost silent. Check mute, input selection and levels.")
-        } else {
-            print("PASS: Microphone delivered audio samples (not recorded).")
+        if data.peak < 0.001 {
+            print("WARNING: Capture is active but audio is very quiet or silent.")
+            print("Check System Settings > Sound > Input, input volume, microphone mute, and whether the input-level meter moves when speaking.")
+            print("If macOS detects sound but DiagStudio does not, inspect the selected input route and audio engine behavior.")
+            return false
         }
+        print("PASS: Microphone delivered non-silent audio samples (not saved).")
         return true
     } catch {
         print("ERROR: Microphone input could not start: \(error.localizedDescription)")

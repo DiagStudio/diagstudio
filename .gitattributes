@@ -1,0 +1,27 @@
+
+# Normalize text files across platforms
+* text=auto
+
+# Source code and scripts must use LF
+*.swift text eol=lf
+*.sh text eol=lf
+*.rb text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.plist text eol=lf
+
+# Git configuration
+.gitattributes text eol=lf
+.gitignore text eol=lf
+
+# Windows scripts
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary
+*.dmg binary

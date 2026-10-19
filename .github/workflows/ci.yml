@@ -1,14 +1,30 @@
-name: macOS CI
+name: Cross-platform CI
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 jobs:
   build:
-    runs-on: macos-15
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: macOS-x86_64, runner: macos-15-intel, arch: x86_64}
+          - {name: macOS-arm64, runner: macos-15, arch: arm64}
+          - {name: Linux-x86_64, runner: ubuntu-24.04, arch: x86_64}
+          - {name: Linux-arm64, runner: ubuntu-24.04-arm, arch: aarch64}
     steps:
       - uses: actions/checkout@v4
+      - name: Confirm native architecture
+        run: test "$(uname -m)" = "${{ matrix.arch }}"
+      - name: Print Swift compiler
+        run: swift --version
       - name: Build
-        run:  bash ./scripts/build.sh
-      - name: Smoke tests (no camera/mic required)
-        run: ./scripts/smoke-test.sh
+        run: bash scripts/build.sh
+      - name: Smoke tests
+        run: bash scripts/smoke-test.sh
+      - name: Examine executable
+        run: file .build/diagstudio
